@@ -1,5 +1,7 @@
 # rerun-viewmap
-This is a map viewer for Spot robot using [Rerun](https://rerun.io/).  
+This is a map viewer for Spot using [Rerun](https://rerun.io/), please check official documentation or github for boston dynamics Spot SDK if you want to know about GraphNav.  
+[GraphNav documentation](https://dev.bostondynamics.com/docs/concepts/autonomy/graphnav_service.html)  
+[GraphNav official service and viewer](https://dev.bostondynamics.com/docs/concepts/autonomy/graphnav_service.html)  
 ![Rerun Map Viewer](./fig/overview.png)
 
 ## Build environment
