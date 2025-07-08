@@ -152,13 +152,6 @@ def visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_
             name = waypoint.annotations.name if waypoint.annotations.name else waypoint.id
             waypoint_labels.append(name)
             
-            # テキストを3D空間に配置（少し上に表示）
-            text_position = position + np.array([0, 0, 1.0])
-            rr.log(f"waypoints/text/{waypoint.id}", 
-                  rr.Transform3D(translation=text_position))
-            rr.log(f"waypoints/text/{waypoint.id}", 
-                  rr.TextDocument(text=name))
-            
             # 常にウェイポイントテキストを表示
             rr.log(f"waypoints/text/{waypoint.id}", 
                   rr.TextDocument(text=name))
@@ -191,7 +184,7 @@ def visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_
               rr.Points3D(waypoint_points, colors=waypoint_colors, radii=0.1))
 
     # 現在地を表示
-    # display_current_location(current_graph, waypoint_positions, current_anchors, current_waypoint_id)
+    display_current_location(current_graph, waypoint_positions, current_anchors, current_waypoint_id)
 
     # エッジを可視化
     edge_lines = []
@@ -215,12 +208,11 @@ def visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_
             rr.log(f"world_objects/{anchored_world_object.id}", 
                   rr.Points3D([position], colors=[0, 0, 255], radii=0.15))
             
-            # テキストを3D空間に配置
-            text_position = position + np.array([0, 0, 1.0])
-            rr.log(f"world_objects/text/{anchored_world_object.id}", 
-                  rr.Transform3D(translation=text_position))
+            # 常にワールドオブジェクトテキストを表示
             rr.log(f"world_objects/text/{anchored_world_object.id}", 
                   rr.TextDocument(text=anchored_world_object.id))
+            rr.log(f"world_objects/text/{anchored_world_object.id}", 
+                  rr.Transform3D(translation=position))
 
 def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints, current_waypoint_id=None):
     waypoint_positions = {}
@@ -253,13 +245,6 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
         # ウェイポイント名を追加
         name = curr_waypoint.annotations.name if curr_waypoint.annotations.name else curr_waypoint.id
         waypoint_labels.append(name)
-        
-        # テキストを3D空間に配置（少し上に表示）
-        text_position = position + np.array([0, 0, 1.0])
-        rr.log(f"waypoints/text/{curr_waypoint.id}", 
-              rr.Transform3D(translation=text_position))
-        rr.log(f"waypoints/text/{curr_waypoint.id}", 
-              rr.TextDocument(text=name))
         
         # 常にウェイポイントテキストを表示
         rr.log(f"waypoints/text/{curr_waypoint.id}", 
@@ -310,12 +295,11 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
                         rr.log(f"fiducials/{fiducial.id}", 
                               rr.Points3D([fiducial_pos], colors=[0, 0, 255], radii=0.1))
                         
-                        # テキストを3D空間に配置
-                        text_position = fiducial_pos + np.array([0, 0, 0.5])
-                        rr.log(f"fiducials/text/{fiducial.id}", 
-                              rr.Transform3D(translation=text_position))
+                        # 常にfiducialテキストを表示
                         rr.log(f"fiducials/text/{fiducial.id}", 
                               rr.TextDocument(text=fiducial.id))
+                        rr.log(f"fiducials/text/{fiducial.id}", 
+                              rr.Transform3D(translation=fiducial_pos))
                     except Exception as e:
                         print(f"fiducial {fiducial.id} の処理に失敗: {e}")
                         continue
@@ -342,7 +326,7 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
               rr.Points3D(waypoint_points, colors=waypoint_colors, radii=0.1))
 
     # 現在地を表示
-    # display_current_location(current_graph, waypoint_positions, None, current_waypoint_id)
+    display_current_location(current_graph, waypoint_positions, None, current_waypoint_id)
 
     # エッジを可視化
     edge_lines = []
@@ -437,6 +421,9 @@ def main():
                                        current_anchors, current_anchored_world_objects)
         else:
             visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints)
+
+        # 現在地を表示（最初のウェイポイントを現在地と仮定）
+        display_current_location(current_graph, current_waypoints, current_anchors)
         
         print("rerun viewerでマップを確認してください。")
         print("プログラムを終了するには Ctrl+C を押してください。")
