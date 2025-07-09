@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import time
 from threading import Thread
+import threading
 
 # rerunのインポート
 import rerun as rr
@@ -132,32 +133,26 @@ def create_point_cloud_data(waypoints, snapshots, waypoint_id):
 def visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_waypoints,
                            current_anchors, current_anchored_world_objects, current_waypoint_id=None):
     waypoint_positions = {}
-    
+
     # ウェイポイントを可視化
     waypoint_points = []
     waypoint_colors = []
     waypoint_labels = []
-    
+
     for waypoint in current_graph.waypoints:
         if waypoint.id in current_anchors:
             seed_tform_waypoint = SE3Pose.from_proto(
                 current_anchors[waypoint.id].seed_tform_waypoint).to_matrix()
             position = seed_tform_waypoint[:3, 3]
             waypoint_positions[waypoint.id] = position
-            
+
             waypoint_points.append(position)
             waypoint_colors.append([0, 100, 255])  # 青色（現在地の赤色と区別）
-            
+
             # ウェイポイント名を追加
             name = waypoint.annotations.name if waypoint.annotations.name else waypoint.id
             waypoint_labels.append(name)
-            
-            # 常にウェイポイントテキストを表示
-            rr.log(f"waypoints/text/{waypoint.id}", 
-                  rr.TextDocument(text=name))
-            rr.log(f"waypoints/text/{waypoint.id}", 
-                  rr.Transform3D(translation=position))
-            
+
             # 点群データがある場合は可視化
             if waypoint.snapshot_id in current_waypoint_snapshots:
                 try:
@@ -168,23 +163,20 @@ def visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_
                         # 点群をseed frameに変換
                         homogeneous_points = np.hstack([point_cloud_data, np.ones((point_cloud_data.shape[0], 1))])
                         transformed_points = (seed_tform_waypoint @ homogeneous_points.T).T[:, :3]
-                        
+
                         # Z座標に基づく色付け
                         z_coords = transformed_points[:, 2]
                         colors = create_colormap(z_coords, 'viridis')
-                        
-                        rr.log(f"waypoints/pointcloud/{waypoint.id}", 
-                              rr.Points3D(transformed_points, colors=colors, radii=0.02))
+
+                        waypoint_points.extend(transformed_points)
+                        waypoint_colors.extend(colors)
                 except Exception as e:
                     print(f"ウェイポイント {waypoint.id} の点群作成に失敗: {e}")
 
     # ウェイポイントを点として描画
     if waypoint_points:
-        rr.log("waypoints/positions", 
-              rr.Points3D(waypoint_points, colors=waypoint_colors, radii=0.1))
-
-    # 現在地を表示
-    display_current_location(current_graph, waypoint_positions, current_anchors, current_waypoint_id)
+        rr.log("waypoints", 
+              rr.Points3D(waypoint_points, colors=waypoint_colors, radii=0.1, labels=waypoint_labels))
 
     # エッジを可視化
     edge_lines = []
@@ -193,26 +185,29 @@ def visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_
             from_pos = waypoint_positions[edge.id.from_waypoint]
             to_pos = waypoint_positions[edge.id.to_waypoint]
             edge_lines.append([from_pos, to_pos])
-    
+
     if edge_lines:
         rr.log("edges", 
               rr.LineStrips3D(edge_lines, colors=[0, 255, 0]))
 
     # アンカー付きワールドオブジェクトを可視化
+    world_object_points = []
+    world_object_colors = []
+    world_object_labels = []
+
     for anchored_wo in current_anchored_world_objects.values():
         if len(anchored_wo) >= 1:  # anchored_world_objectが存在する場合
             anchored_world_object = anchored_wo[0]
             seed_tform_object = SE3Pose.from_proto(anchored_world_object.seed_tform_object).to_matrix()
             position = seed_tform_object[:3, 3]
-            
-            rr.log(f"world_objects/{anchored_world_object.id}", 
-                  rr.Points3D([position], colors=[0, 0, 255], radii=0.15))
-            
-            # 常にワールドオブジェクトテキストを表示
-            rr.log(f"world_objects/text/{anchored_world_object.id}", 
-                  rr.TextDocument(text=anchored_world_object.id))
-            rr.log(f"world_objects/text/{anchored_world_object.id}", 
-                  rr.Transform3D(translation=position))
+
+            world_object_points.append(position)
+            world_object_colors.append([255, 0, 255])  # マゼンタ色
+            world_object_labels.append(anchored_world_object.id)
+
+    if world_object_points:
+        rr.log("world_objects", 
+              rr.Points3D(world_object_points, colors=world_object_colors, radii=0.15, labels=world_object_labels))
 
 def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints, current_waypoint_id=None):
     waypoint_positions = {}
@@ -245,12 +240,6 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
         # ウェイポイント名を追加
         name = curr_waypoint.annotations.name if curr_waypoint.annotations.name else curr_waypoint.id
         waypoint_labels.append(name)
-        
-        # 常にウェイポイントテキストを表示
-        rr.log(f"waypoints/text/{curr_waypoint.id}", 
-              rr.TextDocument(text=name))
-        rr.log(f"waypoints/text/{curr_waypoint.id}", 
-              rr.Transform3D(translation=position))
         
         # 点群データがある場合は可視化
         if curr_waypoint.snapshot_id in current_waypoint_snapshots:
@@ -295,11 +284,12 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
                         rr.log(f"fiducials/{fiducial.id}", 
                               rr.Points3D([fiducial_pos], colors=[0, 0, 255], radii=0.1))
                         
-                        # 常にfiducialテキストを表示
+                        # テキストを3D空間に配置
+                        text_position = fiducial_pos + np.array([0, 0, 0.5])
+                        rr.log(f"fiducials/text/{fiducial.id}", 
+                              rr.Transform3D(translation=text_position))
                         rr.log(f"fiducials/text/{fiducial.id}", 
                               rr.TextDocument(text=fiducial.id))
-                        rr.log(f"fiducials/text/{fiducial.id}", 
-                              rr.Transform3D(translation=fiducial_pos))
                     except Exception as e:
                         print(f"fiducial {fiducial.id} の処理に失敗: {e}")
                         continue
@@ -322,11 +312,28 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
 
     # ウェイポイントを点として描画
     if waypoint_points:
+        # print(waypoint_points)
         rr.log("waypoints/positions", 
-              rr.Points3D(waypoint_points, colors=waypoint_colors, radii=0.1))
+              rr.Points3D(waypoint_points, colors=waypoint_colors, radii=0.5))
+        
+    # 任意のwaypoint.idの座標を探し出してposに格納
+    target_waypoint_id = "amiss-gaur-DOLhLXzIIYWkjGlktRDifA=="  # 探したいウェイポイントID
+    pos = None
+    
+    if target_waypoint_id in waypoint_positions:
+        pos = waypoint_positions[target_waypoint_id]
+        print(f"ウェイポイント {target_waypoint_id} の座標: {pos}")
+        
+        # 見つかった座標を赤色で描画
+        rr.log("waypoints/positions/target", 
+              rr.Points3D([pos], colors=[[255, 0, 0]], radii=1.5))
+    else:
+        print(f"ウェイポイント {target_waypoint_id} が見つかりません")
+        print(f"利用可能なウェイポイントID: {list(waypoint_positions.keys())}")
+        
 
     # 現在地を表示
-    display_current_location(current_graph, waypoint_positions, None, current_waypoint_id)
+    # display_current_location(current_graph, waypoint_positions, None, current_waypoint_id)
 
     # エッジを可視化
     edge_lines = []
@@ -339,6 +346,26 @@ def visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints
     if edge_lines:
         rr.log("edges", 
               rr.LineStrips3D(edge_lines, colors=[0, 255, 0]))
+    
+    # waypoint_positionsを返す
+    return waypoint_positions
+
+def update_current_location_thread(current_graph, waypoint_positions, current_anchors=None):
+    """現在位置を定期的に更新するスレッド関数"""
+    while True:
+        try:
+            # ここで実際のロボットから現在位置を取得する処理を追加
+            # 例: current_waypoint_id = get_robot_current_waypoint()
+            # 今は例として最初のウェイポイントを使用
+            current_waypoint_id = list(waypoint_positions.keys())[0] if waypoint_positions else None
+            
+            if current_waypoint_id:
+                display_current_location(current_graph, waypoint_positions, current_anchors, current_waypoint_id)
+            
+            time.sleep(1)  # 1秒待機
+        except Exception as e:
+            print(f"現在位置更新エラー: {e}")
+            time.sleep(1)
 
 def display_current_location(current_graph, waypoint_positions, current_anchors=None, current_waypoint_id=None):
     # 現在地のウェイポイントIDを決定
@@ -365,31 +392,29 @@ def display_current_location(current_graph, waypoint_positions, current_anchors=
     if current_position is not None:
         # 大きな赤い点で現在地マーカーを表示
         rr.log("current_location", 
-              rr.Points3D([current_position], colors=[255, 0, 0], radii=0.3))
+              rr.Points3D([current_position], colors=[[255, 255, 0]], radii=0.8))
         
-        # 現在地のテキストラベル（Z座標で5上に表示）
+        # 現在地のテキストラベル（Z座標で1上に表示）
+        text_position = current_position + np.array([0, 0, 1.0])
+        rr.log("current_location/text", 
+              rr.Transform3D(translation=text_position))
         rr.log("current_location/text", 
               rr.TextDocument(text="現在地"))
-        rr.log("current_location/text", 
-              rr.Transform3D(translation=current_position + np.array([0, 0, 5.0])))
         
-        print(f"現在地を表示: {current_waypoint_id} at {current_position}")
+        print(f"現在地を更新: {current_waypoint_id} at {current_position}")
     else:
         print(f"警告: 指定されたウェイポイント '{current_waypoint_id}' が見つかりません")
-        # 代替案：利用可能な最初のウェイポイントを現在地として使用
-        if len(waypoint_positions) > 0:
-            fallback_waypoint_id = list(waypoint_positions.keys())[0]
-            fallback_position = waypoint_positions[fallback_waypoint_id]
-            print(f"代替案: {fallback_waypoint_id} を現在地として表示します")
-            
-            rr.log("current_location", 
-                  rr.Points3D([fallback_position], colors=[255, 0, 0], radii=0.3))
-            rr.log("current_location/text", 
-                  rr.TextDocument(text="現在地"))
-            rr.log("current_location/text", 
-                  rr.Transform3D(translation=fallback_position + np.array([0, 0, 5.0])))
 
-# ...existing code...
+def print_waypoint_info(waypoint):
+    print("--- Waypoint Information ---")
+    print(f"ID: {waypoint.id}")
+    if waypoint.annotations.name:
+        print(f"Name: {waypoint.annotations.name}")
+    else:
+        print("Name: None")
+    print(f"Snapshot ID: {waypoint.snapshot_id if waypoint.snapshot_id else 'None'}")
+    print(f"Annotations: {waypoint.annotations}")
+    print("----------------------------")
 
 def main():
     parser = argparse.ArgumentParser(description="visualize Boston Dynamics GraphNav map using rerun")
@@ -405,13 +430,18 @@ def main():
 
     # rerunを初期化
     rr.init("GraphNav Map Viewer", spawn=True)
-    
+
     try:
         # マップを読み込み
         (current_graph, current_waypoints, current_waypoint_snapshots,
          current_edge_snapshots, current_anchors, current_anchored_world_objects) = load_map(args.path)
 
+        # Waypoint[0]の情報を表示
+        if current_graph.waypoints:
+            print_waypoint_info(current_graph.waypoints[0])
+
         # 可視化
+        waypoint_positions = {}
         if args.anchoring:
             if len(current_graph.anchoring.anchors) == 0:
                 print('警告: 描画するアンカーがありません。通常モードで描画します。')
@@ -419,15 +449,28 @@ def main():
             else:
                 visualize_anchored_graph(current_graph, current_waypoint_snapshots, current_waypoints,
                                        current_anchors, current_anchored_world_objects)
+                # アンカーモードでのwaypoint_positionsを取得
+                for waypoint in current_graph.waypoints:
+                    if waypoint.id in current_anchors:
+                        seed_tform_waypoint = SE3Pose.from_proto(
+                            current_anchors[waypoint.id].seed_tform_waypoint).to_matrix()
+                        waypoint_positions[waypoint.id] = seed_tform_waypoint[:3, 3]
         else:
-            visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints)
+            # 通常モードでのwaypoint_positionsを取得するため、visualize_graphを修正する必要があります
+            waypoint_positions = visualize_graph(current_graph, current_waypoint_snapshots, current_waypoints)
 
-        # 現在地を表示（最初のウェイポイントを現在地と仮定）
-        display_current_location(current_graph, current_waypoints, current_anchors)
-        
+        # 現在位置更新スレッドを開始
+        location_thread = threading.Thread(
+            target=update_current_location_thread, 
+            args=(current_graph, waypoint_positions, current_anchors if args.anchoring else None),
+            daemon=True
+        )
+        location_thread.start()
+
         print("rerun viewerでマップを確認してください。")
+        print("現在位置は1秒ごとに更新されます。")
         print("プログラムを終了するには Ctrl+C を押してください。")
-        
+
         # プログラムを実行し続ける
         try:
             while True:
