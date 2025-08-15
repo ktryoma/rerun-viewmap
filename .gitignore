@@ -1,0 +1,5 @@
+# ignore maplist folder
+**/maplist/**/*/
+
+# ignore pycache
+**/__pycache__/ 
